@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Что в холодильнике</title>
+
+<!-- Telegram Mini Apps SDK -->
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+<!-- Firebase (бесплатный уровень с лихвой хватает для семейного списка) -->
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
+
+<style>
+  :root {
+    --bg: var(--tg-theme-bg-color, #F7F5F0);
+    --surface: var(--tg-theme-secondary-bg-color, #FFFFFF);
+    --ink: var(--tg-theme-text-color, #2B2B26);
+    --ink-soft: var(--tg-theme-hint-color, #6B6A62);
+    --line: #E4E1D8;
+    --accent: var(--tg-theme-button-color, #C9A227);
+    --accent-text: var(--tg-theme-button-text-color, #FFFFFF);
+    --have: #4F7A5C;
+    --out: #B8563F;
+  }
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    min-height: 100%;
+  }
+
+  .wrap { max-width: 480px; margin: 0 auto; padding: 16px 16px 100px; }
+
+  h1 {
+    font-size: 22px;
+    font-weight: 700;
+    margin: 4px 0 2px;
+  }
+  .subtitle { color: var(--ink-soft); font-size: 13px; margin: 0 0 16px; }
+
+  .stats { display: flex; gap: 10px; margin-bottom: 18px; }
+  .stat { flex: 1; background: var(--surface); border-radius: 12px; padding: 10px 12px; cursor: pointer; border: 2px solid transparent; transition: border-color .15s; }
+  .stat.active { border-color: var(--accent); }
+  .stat .num { font-size: 20px; font-weight: 700; line-height: 1; }
+  .stat.have .num { color: var(--have); }
+  .stat.out .num { color: var(--out); }
+  .stat .label { font-size: 11px; color: var(--ink-soft); margin-top: 4px; }
+
+  .add-row { display: flex; gap: 8px; margin-bottom: 10px; }
+  .add-row input {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 10px; padding: 12px 14px; font-size: 15px;
+    color: var(--ink); outline: none; min-width: 0;
+  }
+  .add-row input#newItem { flex: 1; }
+  .add-row input:focus { border-color: var(--accent); }
+
+  .add-row2 { display: flex; gap: 8px; margin-bottom: 16px; }
+  .add-row2 input#newAmount { width: 72px; flex: 0 0 auto; }
+  .add-row2 input#newCategory { flex: 1; }
+  .add-row2 button {
+    background: var(--accent); color: var(--accent-text);
+    border: none; border-radius: 10px; padding: 0 16px;
+    font-size: 15px; font-weight: 600; cursor: pointer; flex: 0 0 auto;
+  }
+
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
+  .chip {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 20px; padding: 6px 12px; font-size: 12px;
+    color: var(--ink-soft); cursor: pointer; white-space: nowrap;
+  }
+  .chip.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+
+  .cat-heading {
+    font-size: 12px; font-weight: 700; color: var(--ink-soft);
+    text-transform: uppercase; letter-spacing: 0.04em;
+    margin: 18px 2px 8px;
+  }
+  .cat-heading:first-child { margin-top: 0; }
+
+  ul.list { list-style: none; margin: 0; padding: 0; }
+  li.item {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--surface); border-radius: 12px;
+    padding: 12px 14px; margin-bottom: 8px;
+  }
+  li.item .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  li.item.have .dot { background: var(--have); }
+  li.item.out .dot { background: var(--out); }
+
+  li.item .name { flex: 1; font-size: 15px; display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+  li.item .name .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  li.item.out .name .title { color: var(--out); }
+  li.item .name .amount { font-size: 12px; color: var(--ink-soft); flex-shrink: 0; opacity: 0.75; }
+  li.item .name .cat-tag { font-size: 11px; color: var(--accent); flex-shrink: 0; }
+
+  li.item .del { background: none; border: none; color: var(--ink-soft); font-size: 20px; cursor: pointer; padding: 4px 6px; }
+
+  .empty { text-align: center; color: var(--ink-soft); padding: 40px 20px; font-size: 14px; }
+
+  .toast {
+    position: fixed; bottom: 24px; left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--ink); color: var(--bg);
+    padding: 10px 18px; border-radius: 20px; font-size: 13px;
+    opacity: 0; transition: opacity .25s, transform .25s; pointer-events: none;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  .lock-screen {
+    position: fixed; inset: 0; background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px; z-index: 100;
+  }
+  .lock-card {
+    background: var(--surface); border-radius: 16px;
+    padding: 28px 24px; width: 100%; max-width: 340px; text-align: center;
+  }
+  .lock-card .icon { font-size: 32px; margin-bottom: 8px; }
+  .lock-card h2 { font-size: 18px; margin: 0 0 4px; }
+  .lock-card p { font-size: 13px; color: var(--ink-soft); margin: 0 0 18px; }
+  .lock-card input {
+    width: 100%; background: var(--bg); border: 1px solid var(--line);
+    border-radius: 10px; padding: 12px 14px; font-size: 15px;
+    color: var(--ink); outline: none; margin-bottom: 12px; text-align: center;
+  }
+  .lock-card input:focus { border-color: var(--accent); }
+  .lock-card button {
+    width: 100%; background: var(--accent); color: var(--accent-text);
+    border: none; border-radius: 10px; padding: 12px; font-size: 15px;
+    font-weight: 600; cursor: pointer;
+  }
+  .lock-card .error { color: var(--out); font-size: 13px; margin-top: 10px; min-height: 16px; }
+  .app-hidden { display: none !important; }
+  .logout-link {
+    position: fixed; top: 14px; right: 16px; font-size: 12px;
+    color: var(--ink-soft); cursor: pointer; z-index: 5;
+  }
+</style>
+</head>
+<body>
+  <div class="lock-screen" id="lockScreen">
+    <div class="lock-card">
+      <div class="icon">🔒</div>
+      <h2>Что в холодильнике</h2>
+      <p>Введите общий пароль</p>
+      <input type="password" id="passwordInput" placeholder="Пароль" autocomplete="current-password" />
+      <button id="unlockBtn">Войти</button>
+      <div class="error" id="lockError"></div>
+    </div>
+  </div>
+
+  <span class="logout-link app-hidden" id="logoutLink">Выйти</span>
+
+  <div class="wrap app-hidden" id="appWrap">
+    <h1>Что в холодильнике</h1>
+    <p class="subtitle">Общий список — правит любой из вас</p>
+
+    <div class="stats">
+      <div class="stat have" id="statHave"><div class="num" id="haveCount">0</div><div class="label">есть в наличии</div></div>
+      <div class="stat out" id="statOut"><div class="num" id="outCount">0</div><div class="label">нужно купить</div></div>
+    </div>
+
+    <div class="add-row">
+      <input type="text" id="newItem" placeholder="Добавить продукт…" autocomplete="off" />
+    </div>
+    <div class="add-row2">
+      <input type="text" id="newAmount" placeholder="10 шт" autocomplete="off" />
+      <input type="text" id="newCategory" placeholder="Категория (необязательно)" autocomplete="off" list="categoryOptions" />
+      <button id="addBtn">+</button>
+    </div>
+    <datalist id="categoryOptions"></datalist>
+
+    <div class="chips" id="categoryChips"></div>
+
+    <div id="listContainer">
+      <div class="empty" id="emptyState">Список пуст. Добавьте первый продукт.</div>
+      <div id="list"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    // ====== 1. ВСТАВЬТЕ СЮДА СВОЙ FIREBASE CONFIG ======
+    // Получить: console.firebase.google.com -> ваш проект -> Project settings
+    // -> вкладка "General" -> "Your apps" -> Web app -> firebaseConfig
+    const FIREBASE_CONFIG = {
+      apiKey: "AIzaSyBaOVIdySXDoZ7qy5gwmmrs1IziWMNs8yo",
+      authDomain: "dzhfridge.firebaseapp.com",
+      projectId: "dzhfridge",
+      storageBucket: "dzhfridge.firebasestorage.app",
+      messagingSenderId: "265015035857",
+      appId: "1:265015035857:web:5d02b8a1ceedb50bc702f0"
+    };
+    // ====================================================
+
+    // Telegram Mini App init
+    const tg = window.Telegram ? window.Telegram.WebApp : null;
+    if (tg) {
+      tg.ready();
+      tg.expand();
+    }
+
+    firebase.initializeApp(FIREBASE_CONFIG);
+    const db = firebase.firestore();
+    const auth = firebase.auth();
+    const itemsRef = db.collection('fridge_items');
+
+    const AUTH_EMAIL = 'family@dzhfridge.app'; // должен совпадать с email пользователя в Firebase Auth
+
+    const lockScreen = document.getElementById('lockScreen');
+    const passwordInput = document.getElementById('passwordInput');
+    const unlockBtn = document.getElementById('unlockBtn');
+    const lockError = document.getElementById('lockError');
+    const appWrap = document.getElementById('appWrap');
+    const logoutLink = document.getElementById('logoutLink');
+
+    async function tryLogin() {
+      const pass = passwordInput.value;
+      if (!pass) return;
+      unlockBtn.disabled = true;
+      unlockBtn.textContent = 'Проверка…';
+      lockError.textContent = '';
+      try {
+        await auth.signInWithEmailAndPassword(AUTH_EMAIL, pass);
+      } catch (err) {
+        lockError.textContent = 'Неверный пароль';
+        unlockBtn.disabled = false;
+        unlockBtn.textContent = 'Войти';
+      }
+    }
+
+    unlockBtn.addEventListener('click', tryLogin);
+    passwordInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') tryLogin(); });
+
+    logoutLink.addEventListener('click', () => {
+      auth.signOut();
+    });
+
+    auth.onAuthStateChanged((user) => {
+      if (user) {
+        lockScreen.classList.add('app-hidden');
+        appWrap.classList.remove('app-hidden');
+        logoutLink.classList.remove('app-hidden');
+        startListening();
+      } else {
+        lockScreen.classList.remove('app-hidden');
+        appWrap.classList.add('app-hidden');
+        logoutLink.classList.add('app-hidden');
+        passwordInput.value = '';
+        unlockBtn.disabled = false;
+        unlockBtn.textContent = 'Войти';
+        stopListening();
+      }
+    });
+
+    const listEl = document.getElementById('list');
+    const emptyEl = document.getElementById('emptyState');
+    const haveCountEl = document.getElementById('haveCount');
+    const outCountEl = document.getElementById('outCount');
+    const statHaveEl = document.getElementById('statHave');
+    const statOutEl = document.getElementById('statOut');
+    const chipsEl = document.getElementById('categoryChips');
+    const categoryOptionsEl = document.getElementById('categoryOptions');
+    const newItemInput = document.getElementById('newItem');
+    const newAmountInput = document.getElementById('newAmount');
+    const newCategoryInput = document.getElementById('newCategory');
+    const addBtn = document.getElementById('addBtn');
+    const toastEl = document.getElementById('toast');
+
+    let currentItems = [];
+    let statusFilter = 'all'; // 'all' | 'have' | 'out'
+    let categoryFilter = 'all';
+
+    function parseLeadingNumber(str) {
+      if (!str) return null;
+      const m = String(str).trim().match(/^(\d+)/);
+      return m ? parseInt(m[1], 10) : null;
+    }
+
+    function haptic(type) {
+      if (tg && tg.HapticFeedback) {
+        if (type === 'success') tg.HapticFeedback.notificationOccurred('success');
+        else tg.HapticFeedback.impactOccurred('light');
+      }
+    }
+
+    function showToast(msg) {
+      toastEl.textContent = msg;
+      toastEl.classList.add('show');
+      setTimeout(() => toastEl.classList.remove('show'), 1800);
+    }
+
+    function escapeHtml(str) {
+      const d = document.createElement('div');
+      d.textContent = str;
+      return d.innerHTML;
+    }
+
+    function render(items) {
+      currentItems = items;
+
+      // Собираем категории
+      const categories = Array.from(new Set(items.map(i => i.category).filter(Boolean))).sort();
+      categoryOptionsEl.innerHTML = categories.map(c => `<option value="${escapeHtml(c)}">`).join('');
+
+      // Чипы категорий
+      const allChip = `<span class="chip ${categoryFilter === 'all' ? 'active' : ''}" data-cat="all">Все</span>`;
+      const catChips = categories.map(c => `<span class="chip ${categoryFilter === c ? 'active' : ''}" data-cat="${escapeHtml(c)}">${escapeHtml(c)}</span>`).join('');
+      chipsEl.innerHTML = categories.length ? allChip + catChips : '';
+
+      // Счётчики считаем по общему списку (не по текущему фильтру)
+      haveCountEl.textContent = items.filter(i => i.status === 'have').length;
+      outCountEl.textContent = items.filter(i => i.status === 'out').length;
+      statHaveEl.classList.toggle('active', statusFilter === 'have');
+      statOutEl.classList.toggle('active', statusFilter === 'out');
+
+      // Применяем фильтры
+      let filtered = items;
+      if (statusFilter !== 'all') filtered = filtered.filter(i => i.status === statusFilter);
+      if (categoryFilter !== 'all') filtered = filtered.filter(i => (i.category || '') === categoryFilter);
+
+      if (items.length === 0) {
+        emptyEl.textContent = 'Список пуст. Добавьте первый продукт.';
+        emptyEl.style.display = 'block';
+        listEl.innerHTML = '';
+        return;
+      }
+      if (filtered.length === 0) {
+        emptyEl.textContent = 'Ничего не найдено по этому фильтру.';
+        emptyEl.style.display = 'block';
+        listEl.innerHTML = '';
+        return;
+      }
+      emptyEl.style.display = 'none';
+
+      const sorted = filtered.slice().sort((a, b) => {
+        if (a.status !== b.status) return a.status === 'out' ? -1 : 1;
+        return (a.createdAt || 0) - (b.createdAt || 0);
+      });
+
+      // Группируем по категории только когда смотрим "Все категории" и категорий больше одной
+      const groupByCategory = categoryFilter === 'all' && categories.length > 0;
+
+      if (!groupByCategory) {
+        listEl.innerHTML = renderItemsHtml(sorted);
+      } else {
+        const groups = {};
+        const noCat = [];
+        sorted.forEach(item => {
+          if (item.category) {
+            groups[item.category] = groups[item.category] || [];
+            groups[item.category].push(item);
+          } else {
+            noCat.push(item);
+          }
+        });
+        let html = '';
+        if (noCat.length) html += renderItemsHtml(noCat);
+        Object.keys(groups).sort().forEach(cat => {
+          html += `<div class="cat-heading">${escapeHtml(cat)}</div>` + renderItemsHtml(groups[cat]);
+        });
+        listEl.innerHTML = html;
+      }
+    }
+
+    function renderItemsHtml(items) {
+      return `<ul class="list">` + items.map(item => `
+        <li class="item ${item.status}" data-id="${item.id}">
+          <span class="dot" data-action="toggle" data-id="${item.id}"></span>
+          <span class="name">
+            <span class="title" data-action="toggle" data-id="${item.id}">${escapeHtml(item.name)}</span>
+            <span class="amount" data-action="edit-amount" data-id="${item.id}">${item.amount ? escapeHtml(item.amount) : '+ кол-во'}</span>
+          </span>
+          <button class="del" data-action="delete" data-id="${item.id}">×</button>
+        </li>
+      `).join('') + `</ul>`;
+    }
+
+    statHaveEl.addEventListener('click', () => {
+      statusFilter = statusFilter === 'have' ? 'all' : 'have';
+      render(currentItems);
+    });
+    statOutEl.addEventListener('click', () => {
+      statusFilter = statusFilter === 'out' ? 'all' : 'out';
+      render(currentItems);
+    });
+    chipsEl.addEventListener('click', (e) => {
+      const chip = e.target.closest('.chip');
+      if (!chip) return;
+      categoryFilter = chip.dataset.cat;
+      render(currentItems);
+    });
+
+    listEl.addEventListener('click', async (e) => {
+      const target = e.target.closest('[data-action]');
+      if (!target) return;
+      const id = target.dataset.id;
+      const action = target.dataset.action;
+
+      try {
+        if (action === 'toggle') {
+          const item = currentItems.find(i => i.id === id);
+          if (!item) return;
+          await itemsRef.doc(id).update({ status: item.status === 'have' ? 'out' : 'have' });
+          haptic('light');
+        } else if (action === 'delete') {
+          await itemsRef.doc(id).delete();
+          haptic('light');
+        } else if (action === 'edit-amount') {
+          const item = currentItems.find(i => i.id === id);
+          const val = window.prompt('Количество (например «10 шт», «0», «2 л»):', item && item.amount ? item.amount : '');
+          if (val === null) return;
+          const trimmed = val.trim();
+          const num = parseLeadingNumber(trimmed);
+          const update = { amount: trimmed || null };
+          if (num !== null) update.status = num === 0 ? 'out' : 'have';
+          await itemsRef.doc(id).update(update);
+        }
+      } catch (err) {
+        showToast('Не удалось изменить');
+      }
+    });
+
+    async function addItem() {
+      const name = newItemInput.value.trim();
+      const amount = newAmountInput.value.trim();
+      const category = newCategoryInput.value.trim();
+      if (!name) return;
+      newItemInput.value = '';
+      newAmountInput.value = '';
+      newCategoryInput.value = '';
+      const num = parseLeadingNumber(amount);
+      const status = num === 0 ? 'out' : 'have';
+      try {
+        await itemsRef.add({
+          name,
+          amount: amount || null,
+          category: category || null,
+          status,
+          createdAt: Date.now()
+        });
+        haptic('success');
+      } catch (err) {
+        showToast('Не удалось добавить');
+      }
+      newItemInput.focus();
+    }
+
+    addBtn.addEventListener('click', addItem);
+    newItemInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') newAmountInput.focus(); });
+    newAmountInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') newCategoryInput.focus(); });
+    newCategoryInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') addItem(); });
+
+    let unsubscribeSnapshot = null;
+
+    function startListening() {
+      if (unsubscribeSnapshot) return;
+      unsubscribeSnapshot = itemsRef.onSnapshot(
+        (snap) => {
+          const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          render(items);
+        },
+        (err) => {
+          showToast('Ошибка связи с базой');
+          console.error(err);
+        }
+      );
+    }
+
+    function stopListening() {
+      if (unsubscribeSnapshot) {
+        unsubscribeSnapshot();
+        unsubscribeSnapshot = null;
+      }
+    }
+  </script>
+</body>
+</html>
